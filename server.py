@@ -3,7 +3,6 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 from pydantic import BaseModel, Field
-from typing import List
 import uuid
 from datetime import datetime, timezone
 
@@ -31,10 +30,6 @@ class NfcReadCreate(BaseModel):
 class AccessKeyValidate(BaseModel):
     key: str
 
-class AccessKeyUpdate(BaseModel):
-    current_key: str
-    new_key: str
-
 @api_router.get("/")
 async def root():
     return {"message": "NFC Server Online"}
@@ -61,19 +56,6 @@ async def validate_key(body: AccessKeyValidate):
     if not key_doc:
         return {"valid": body.key == "MRROBOT2026"}
     return {"valid": body.key == key_doc["key"]}
-
-@api_router.put("/access-key")
-async def update_access_key(body: AccessKeyUpdate):
-    key_doc = await db.settings.find_one({"type": "access_key"})
-    current = key_doc["key"] if key_doc else "MRROBOT2026"
-    if body.current_key != current:
-        raise HTTPException(status_code=403, detail="Wrong key")
-    await db.settings.update_one(
-        {"type": "access_key"},
-        {"$set": {"key": body.new_key}},
-        upsert=True
-    )
-    return {"message": "Key updated"}
 
 app.include_router(api_router)
 app.add_middleware(
