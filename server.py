@@ -1,7 +1,3 @@
-
-Soluzione Rapida:
-Aggiorna il file server.py su GitHub con questo codice esatto (copia-incolla tutto):
-
 from fastapi import FastAPI, APIRouter
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
