@@ -1,4 +1,8 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+
+Soluzione Rapida:
+Aggiorna il file server.py su GitHub con questo codice esatto (copia-incolla tutto):
+
+from fastapi import FastAPI, APIRouter
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -40,7 +44,6 @@ async def save_read(read_input: NfcReadCreate):
         uid=read_input.uid,
         tech_type=read_input.tech_type,
         pin=read_input.pin,
-        is_accepted=True,
     )
     await db.nfc_reads.insert_one(read_obj.dict())
     return read_obj
@@ -52,10 +55,7 @@ async def get_latest_read():
 
 @api_router.post("/validate-key")
 async def validate_key(body: AccessKeyValidate):
-    key_doc = await db.settings.find_one({"type": "access_key"})
-    if not key_doc:
-        return {"valid": body.key == "MRROBOT2026"}
-    return {"valid": body.key == key_doc["key"]}
+    return {"valid": body.key == "MRROBOT2026"}
 
 app.include_router(api_router)
 app.add_middleware(
