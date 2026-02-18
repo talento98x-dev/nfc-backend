@@ -140,15 +140,22 @@ async def get_latest_read():
         return None
     return read
 
-# --- Device Check (for XX PAY app) ---
+# --- Device Check (IMPORTANTE per XX PAY app) ---
 @api_router.get("/check_device")
 async def check_device(device_id: str = ""):
     return {
-        "status": "valid",
-        "message": "Device authorized",
-        "device_id": device_id,
-        "license_type": "full",
-        "expiry": "2099-12-31"
+        "status": "ACTIVE",
+        "message": "Licenza attiva",
+        "expires_at": "2099-12-31"
+    }
+
+# Endpoint PHP-style per compatibilità con l'app originale
+@app.get("/api/check_device.php")
+async def check_device_php(device_id: str = ""):
+    return {
+        "status": "ACTIVE",
+        "message": "Licenza attiva",
+        "expires_at": "2099-12-31"
     }
 
 # --- Access Key ---
@@ -213,7 +220,6 @@ async def shutdown_db_client():
     client.close()
 
 # ==================== NFC RELAY WEBSOCKET ====================
-# Real-time relay between Reader and Emulator
 
 class NFCRelayManager:
     def __init__(self):
