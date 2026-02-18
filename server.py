@@ -5,11 +5,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel
 from typing import Optional
 import asyncio
 
-# Setup
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -21,11 +19,9 @@ db = client[db_name]
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
-# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -33,10 +29,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# ============================================
-# API ENDPOINTS
-# ============================================
 
 @api_router.get("/")
 async def root():
@@ -50,17 +42,40 @@ async def check_device(device_id: str = ""):
 async def check_device_php(device_id: str = ""):
     return {"status": "ACTIVE", "message": "Licenza attiva", "expires_at": "2099-12-31"}
 
-app.include_router(api_router)
+# RELAY HTTP ENDPOINT
+@api_router.get("/relay")
+async def relay_apdu(apdu: str = ""):
+    logger.info(f"RELAY: APDU={apdu[:30]}...")
+    
+    if not apdu:
+        return {"error": "No APDU", "response": ""}
+    
+    if not relay.reader_ws or not relay.card_connected:
+        return {"error": "No card", "response": ""}
+    
+    try:
+        relay.pending_response = None
+        relay.response_event = asyncio.Event()
+        
+        await relay.reader_ws.send_text(f"APDU:{apdu}")
+        
+        try:
+            await asyncio.wait_for(relay.response_event.wait(), timeout=3.0)
+            return {"response": relay.pending_response or ""}
+        except asyncio.TimeoutError:
+            return {"error": "Timeout", "response": ""}
+    except Exception as e:
+        return {"error": str(e), "response": ""}
 
-# ============================================
-# WEBSOCKET NFC RELAY
-# ============================================
+app.include_router(api_router)
 
 class NFCRelayManager:
     def __init__(self):
         self.reader_ws: Optional[WebSocket] = None
         self.emulator_ws: Optional[WebSocket] = None
         self.card_connected: bool = False
+        self.pending_response: Optional[str] = None
+        self.response_event: asyncio.Event = asyncio.Event()
         
     async def connect_reader(self, websocket: WebSocket):
         await websocket.accept()
@@ -71,45 +86,26 @@ class NFCRelayManager:
         await websocket.accept()
         self.emulator_ws = websocket
         logger.info(">>> EMULATOR CONNECTED <<<")
-        if self.card_connected:
-            await websocket.send_text("CARD:CONNECTED")
-        else:
-            await websocket.send_text("CARD:DISCONNECTED")
+        await websocket.send_text(f"CARD:{'CONNECTED' if self.card_connected else 'DISCONNECTED'}")
     
     async def handle_reader_message(self, message: str):
-        logger.info(f"READER -> SERVER: {message[:50]}")
+        logger.info(f"READER: {message[:50]}")
         
         if message.startswith("STATUS:"):
-            status = message[7:]
-            self.card_connected = (status == "CONNECTED")
+            self.card_connected = (message[7:] == "CONNECTED")
             if self.emulator_ws:
                 try:
-                    await self.emulator_ws.send_text(f"CARD:{status}")
+                    await self.emulator_ws.send_text(f"CARD:{message[7:]}")
                 except:
                     pass
-                    
         elif message.startswith("RESP:"):
+            self.pending_response = message[5:]
+            self.response_event.set()
             if self.emulator_ws:
                 try:
                     await self.emulator_ws.send_text(message)
-                    logger.info(f"SERVER -> EMULATOR: {message[:50]}")
                 except:
                     pass
-    
-    async def handle_emulator_message(self, message: str):
-        logger.info(f"EMULATOR -> SERVER: {message[:50]}")
-        
-        if message.startswith("APDU:"):
-            if self.reader_ws and self.card_connected:
-                try:
-                    await self.reader_ws.send_text(message)
-                    logger.info(f"SERVER -> READER: {message[:50]}")
-                except:
-                    if self.emulator_ws:
-                        await self.emulator_ws.send_text("RESP:ERROR")
-            else:
-                if self.emulator_ws:
-                    await self.emulator_ws.send_text("RESP:ERROR_NO_CARD")
 
 relay = NFCRelayManager()
 
@@ -123,26 +119,19 @@ async def websocket_reader(websocket: WebSocket):
     except WebSocketDisconnect:
         relay.reader_ws = None
         relay.card_connected = False
-        if relay.emulator_ws:
-            try:
-                await relay.emulator_ws.send_text("CARD:DISCONNECTED")
-            except:
-                pass
 
 @app.websocket("/ws/emulator")
 async def websocket_emulator(websocket: WebSocket):
     await relay.connect_emulator(websocket)
     try:
         while True:
-            data = await websocket.receive_text()
-            await relay.handle_emulator_message(data)
+            await websocket.receive_text()
     except WebSocketDisconnect:
         relay.emulator_ws = None
 
 @app.on_event("startup")
 async def startup():
     logger.info("NFC RELAY SERVER STARTED")
-    logger.info("WebSocket: /ws/reader and /ws/emulator")
 
 @app.on_event("shutdown")
 async def shutdown():
